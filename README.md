@@ -58,17 +58,12 @@ This template deploys one Railway service built from a custom Dockerfile that co
 
 | Variable | Required | Description |
 |---|---|---|
-| `PORT` | ✅ | HTTP port Gatus listens on (Railway routes traffic here) |
 | `GATUS_CONFIG_PATH` | ✅ | Path inside the container where Gatus reads `config.yaml` |
 | `GATUS_CONFIG_YAML` | optional | Full YAML config — overrides baked-in default on every boot |
-| `GATUS_ADMIN_USERNAME` | optional | Basic-auth username (enables HTTP auth when paired with password) |
-| `GATUS_ADMIN_PASSWORD` | optional | Basic-auth plaintext password (entrypoint bcrypts it at boot) |
 
 ### Deployment Dependencies for Self-Hosting Gatus
 
-- Runtime: Alpine Linux 3.20 + statically-linked Gatus binary
 - Upstream project: [github.com/TwiN/gatus](https://github.com/TwiN/gatus)
-- Upstream Docker image: [hub.docker.com/r/twinproduction/gatus](https://hub.docker.com/r/twinproduction/gatus)
 - Official documentation: [gatus.io](https://gatus.io/)
 
 ## Hardware Requirements for Self-Hosting Gatus on Railway
@@ -80,7 +75,7 @@ This template deploys one Railway service built from a custom Dockerfile that co
 | Storage | 1 GB volume | 5 GB volume |
 | Runtime | Alpine 3.20 / Go static binary | Alpine 3.20 / Go static binary |
 
-Gatus is extremely lightweight — the binary idles around 30 MB RAM. Storage grows with retention; 1 GB handles ~6 months of history for 20 endpoints at 60s intervals.
+Gatus is extremely lightweight — the binary idles around 30 MB RAM.
 
 ## Self-Hosting Gatus With a Custom Configuration
 
@@ -128,7 +123,7 @@ docker run -d \
 
 ## How Much Does Gatus Cost to Self-Host?
 
-Gatus is fully open-source under the Apache 2.0 license — the software itself is free forever, with no paid tier, license keys, or feature gates. On Railway you only pay for the underlying compute, RAM, egress, and volume storage; a typical small deployment monitoring 10–50 endpoints fits comfortably inside the Hobby plan's $5 monthly credit. There is no SaaS version of Gatus to compare against; self-hosting is the only way to use it, which makes Railway's managed infrastructure the closest thing to a hosted Gatus offering.
+Gatus is fully open-source under the Apache 2.0 license — the software itself is free forever, with no paid tier. On Railway you only pay for the underlying compute, RAM, egress, and volume storage; a typical small deployment monitoring 10–50 endpoints fits comfortably inside the Hobby plan's $5 monthly credit.
 
 ## FAQ
 
@@ -136,9 +131,22 @@ Gatus is fully open-source under the Apache 2.0 license — the software itself 
 
 Gatus is an open-source automated status page and health monitoring tool. Self-hosting on Railway gives you full control over the endpoints you probe (including internal services on Railway's private network) without paying per-monitor fees to a SaaS like Pingdom or Better Uptime.
 
-**What Does This Railway Template Deploy?**
+**How Do I Export Monitoring Data From Gatus via the REST API?**
 
-One Gatus service built from a custom Dockerfile (multi-stage from `twinproduction/gatus:stable` into `alpine:3.20`), with a Railway volume mounted at `/data` for the embedded SQLite database and config file. The service is exposed on a public HTTPS domain.
+Gatus exposes every status check over HTTP, so you can pull data from anywhere with `curl`. The main endpoints are `/api/v1/endpoints/statuses` (full snapshot of all endpoints), `/api/v1/endpoints/{group}_{name}/statuses?page=1&pageSize=100` (paginated history for one endpoint), and `/metrics` (Prometheus format, if enabled in config). Without auth:
+
+```
+curl https://your-gatus.up.railway.app/api/v1/endpoints/statuses > snapshot.json
+```
+
+If you've set `GATUS_ADMIN_USERNAME` / `GATUS_ADMIN_PASSWORD`, pass them with `-u`:
+
+```
+curl -u admin:yourpassword https://your-gatus.up.railway.app/api/v1/endpoints/statuses > snapshot.json
+```
+
+The response is JSON containing every endpoint, every probe result, response times, and condition pass/fail — pipe it into `jq`, store it in S3, or feed it to a BI tool.
+
 
 **Why is SQLite Used Instead of an External Postgres for Gatus?**
 
@@ -148,10 +156,30 @@ For small-to-medium dashboards (under a few hundred endpoints), Gatus's embedded
 
 Set `GATUS_ADMIN_USERNAME` and `GATUS_ADMIN_PASSWORD` on the Gatus service in Railway, then trigger a redeploy. The entrypoint script bcrypts the password and injects a `security.basic` block into `/data/config.yaml` automatically. To switch to OIDC instead, add a `security.oidc:` block directly inside `GATUS_CONFIG_YAML`.
 
-**How Do I Update Gatus on Railway After a New Release?**
+**What Format Should I Use for the GATUS_CONFIG_YAML Variable?**
 
-Click "Redeploy" in the Railway dashboard — the build re-pulls `twinproduction/gatus:stable` (or whatever tag is pinned in the Dockerfile) and ships a fresh container without losing your config or history on the volume.
+Paste a standard Gatus YAML configuration — the same format the upstream project uses, with `storage:`, `endpoints:`, and optional `alerting:` / `security:` blocks. Gatus does its own `${VAR}` substitution at load time, so secrets can stay as env-var references. A minimal working example:
 
-**Can Gatus Probe Other Services Running Inside the Same Railway Project?**
+```
+storage:
+  type: sqlite
+  path: /data/gatus.db
 
-Yes. Use Railway's private networking by setting endpoint URLs to `http://${{OtherService.RAILWAY_PRIVATE_DOMAIN}}:/health` inside `GATUS_CONFIG_YAML`. This keeps internal probes off the public internet.
+endpoints:
+  - name: my-api
+    url: https://api.example.com/health
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1000"
+      - "[BODY].status == UP"
+
+  - name: marketing-site
+    url: https://www.example.com
+    interval: 5m
+    conditions:
+      - "[STATUS] == 200"
+      - "[CERTIFICATE_EXPIRATION] > 168h"
+```
+
+After pasting and saving, Railway redeploys automatically. The entrypoint writes the YAML to `/data/config.yaml` on boot, so your changes take effect on the next container start. Full schema reference: [gatus.io/docs](https://gatus.io/docs).
