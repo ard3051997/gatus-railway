@@ -1,0 +1,31 @@
+storage:
+  type: sqlite
+  path: /data/gatus.db
+
+ui:
+  title: "Gatus Status Page"
+  header: "Service Health"
+
+endpoints:
+  - name: gatus-website
+    group: external
+    url: https://gatus.io/
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+
+  - name: google
+    group: external
+    url: https://www.google.com
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1500"
+
+  - name: cloudflare-dns
+    group: external
+    url: https://1.1.1.1
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
