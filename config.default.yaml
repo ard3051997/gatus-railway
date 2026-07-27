@@ -50,6 +50,7 @@ endpoints:
   # ==========================================
   # Group: API Monitoring
   # ==========================================
+
   - name: emi-currency-api
     group: API Monitoring
     url: https://emi-cc-api.kalagato.co/api/currency/
@@ -375,10 +376,6 @@ endpoints:
       - "[BODY] == pat(*Australia*)"
       - "[BODY] == pat(*Netherlands*)"
       - "[BODY] == pat(*France*)"
-
-  # ==========================================
-  # Group: Turbo VPN Server Locations
-  # ==========================================
     alerts:
       - type: slack
       - type: pagerduty
